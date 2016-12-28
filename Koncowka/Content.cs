@@ -1,16 +1,13 @@
 ﻿using Newtonsoft.Json.Linq;
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Koncowka
 {
-    public class Picture
+    public class Content
     {
         private string[] arrayOfSrcs;
-        public Picture(string json)
+        public Content(string json)
         {
             JObject jObject = JObject.Parse(json);
             object[] temp = (object [])(jObject["images"].ToArray());
