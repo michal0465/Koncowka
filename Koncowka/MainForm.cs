@@ -1,26 +1,26 @@
 ﻿using Newtonsoft.Json.Linq;
 using Quobject.SocketIoClientDotNet.Client;
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+using AxWMPLib;
 
 namespace Koncowka
 {
     public partial class MainForm : Form
     {
         private string clientName;
-        private List<Bitmap> images = new List<Bitmap>();
+        private List<Object> files = new List<Object>();
         private Timer timer;
         private int counter;
         private const string url = "http://ti.tambou.pl:3000/user-images/";
         private const string wsUrl = "ws://ti.tambou.pl:3000/";
         private dynamic socket;
-
+       
         public MainForm()
         {
             InitializeComponent();
@@ -42,6 +42,8 @@ namespace Koncowka
         {
             clientName = (string)userComboBox.SelectedValue;
             TimerReset();
+            files.Clear();
+            counter = 0;
 
             if (System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
             {
@@ -63,9 +65,9 @@ namespace Koncowka
             await Sync.SynchronizeFiles(url, clientName);
             this.Text = this.Name;
 
-            ImageList(clientName);
+            FileList(clientName);
 
-            if (images.Count > 0)
+            if (files.Count > 0)
             {
                 TimerInit();
             }
@@ -79,15 +81,15 @@ namespace Koncowka
             DirectoryInfo di = new DirectoryInfo(clientName);
             if (di.Exists)
             {
-                ImageList(clientName);
+                FileList(clientName);
 
-                if (images.Count > 0)
+                if (files.Count > 0)
                 {
                     TimerInit();
                 }
                 else
                     this.Text = "Brak plików do wyświetlenia.";
-            }          
+            }
         }
 
         private void btnDisconnect_Click(object sender, EventArgs e)
@@ -100,22 +102,33 @@ namespace Koncowka
             }
         }
 
-        private void ImageList(string dirName)
+        private void FileList(string dirName)
         {
-            var fileEntries = Directory.EnumerateFiles(dirName, "*.*")
-            .Where(s => s.EndsWith(".png") || s.EndsWith(".jpg") || s.EndsWith(".jpeg") || s.EndsWith(".bmp"));
+            List<string> videos = new List<string>();
+
+            var imageEntries = Directory.EnumerateFiles(dirName, "*.*")
+                .Where(s => s.EndsWith(".png") || s.EndsWith(".jpg") || s.EndsWith(".jpeg") || s.EndsWith(".bmp"));
+
+            var videoEntries = Directory.EnumerateFiles(dirName, "*.*")
+            .Where(s => s.EndsWith(".mp4") || s.EndsWith(".avi"));
 
             pictureBox.Image = null;
-            images.Clear();
+            files.Clear();
+            videos.Clear();
 
-            foreach (var file in fileEntries)
+            foreach (var s in videoEntries)
+            {
+                files.Add(s);
+            }
+
+            foreach (var file in imageEntries)
             {
                 try
                 {
                     using (var fs = new System.IO.FileStream(file, System.IO.FileMode.Open))
                     {
                         var bmp = new Bitmap(fs);
-                        images.Add(ReSize((Bitmap)bmp.Clone()));
+                        files.Add(ReSize((Bitmap)bmp.Clone()));
                     }
                 }
                 catch (ArgumentException)
@@ -151,7 +164,21 @@ namespace Koncowka
 
         private void TimerInit()
         {
-            pictureBox.Image = images[0];
+            if (files[counter] is Bitmap)
+                pictureBox.Image = (Bitmap)files[0];
+            else
+            {
+                axWindowsMediaPlayer1.Visible = true;
+                //axWindowsMediaPlayer1.uiMode = "none";
+                PlayFile((string)files[counter]);
+                timer.Stop();
+                counter++;
+                if (files[counter] is Bitmap)
+                {
+                    pictureBox.Image = (Bitmap)files[counter];
+                }
+            }
+
             counter = 1;
             timer.Interval = 5000;
             timer.Tick += new EventHandler(TimerElapsed);
@@ -167,12 +194,28 @@ namespace Koncowka
 
         private void TimerElapsed(object sender, EventArgs e)
         {
-            if (images.Count > 0)
+            if (files.Count > 0)
             {
-                if (counter >= images.Count)
+                if (counter >= files.Count)
                     counter = 0;
-                pictureBox.Image = images[counter];
-                counter++;
+
+                if (files[counter] is Bitmap)
+                {
+                    pictureBox.Image = (Bitmap)files[counter];
+                    counter++;
+                }
+                else if (files[counter] is string)
+                {
+                    axWindowsMediaPlayer1.Visible = true;
+                    //axWindowsMediaPlayer1.uiMode = "none";
+                    PlayFile((string)files[counter]);
+                    timer.Stop();
+                    counter++;
+                    if (files[counter] is Bitmap)
+                    {
+                        pictureBox.Image = (Bitmap)files[counter];
+                    }
+                }
             }
         }
 
@@ -180,6 +223,9 @@ namespace Koncowka
         {
             if (e.KeyCode == Keys.Escape)
             {
+                if (axWindowsMediaPlayer1.fullScreen)
+                    axWindowsMediaPlayer1.fullScreen = false;
+
                 this.WindowState = FormWindowState.Normal;
                 this.FormBorderStyle = FormBorderStyle.FixedDialog;
                 pictureBox.SizeMode = PictureBoxSizeMode.StretchImage;
@@ -240,12 +286,25 @@ namespace Koncowka
                     this.Text = this.Name;
                 });
 
-                ImageList(clientName);
-                if (images.Count > 0)
+                FileList(clientName);
+                if (files.Count > 0)
                 {
                     try
                     {
-                        pictureBox.Image = images[0];
+                        if (files[counter] is Bitmap)
+                            pictureBox.Image = (Bitmap)files[0];
+                        else
+                        {
+                            axWindowsMediaPlayer1.Visible = true;
+                            //axWindowsMediaPlayer1.uiMode = "none";
+                            PlayFile((string)files[counter]);
+                            timer.Stop();
+                            counter++;
+                            if (files[counter] is Bitmap)
+                            {
+                                pictureBox.Image = (Bitmap)files[counter];
+                            }
+                        }
                     }
                     catch
                     {
@@ -259,6 +318,35 @@ namespace Koncowka
             }
             else
                 this.Text = "Brak połączenia z serwerem.";
+        }
+
+        private void PlayFile(String url)
+        {
+            axWindowsMediaPlayer1.URL = url;
+            axWindowsMediaPlayer1.settings.autoStart = true;
+
+            axWindowsMediaPlayer1.PlayStateChange += new AxWMPLib._WMPOCXEvents_PlayStateChangeEventHandler(Player_PlayStateChange);
+        }
+
+        private void Player_PlayStateChange(object sender, _WMPOCXEvents_PlayStateChangeEvent e)
+        {
+            switch (e.newState)
+            {
+                case 1:    // Stopped
+                    timer.Start();
+                    axWindowsMediaPlayer1.Visible = false;
+                    break;
+
+                case 2:    // Paused
+                    axWindowsMediaPlayer1.fullScreen = false;
+                    break;
+
+                case 3:    // Playing
+                    //axWindowsMediaPlayer1.fullScreen = true;
+                    break;
+                default:
+                    break;
+            }
         }
 
         public event EventHandler NewContent;
