@@ -8,6 +8,9 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using AxWMPLib;
+using Newtonsoft.Json;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Formatters.Binary;
 
 namespace Koncowka
 {
@@ -17,10 +20,12 @@ namespace Koncowka
         private List<Object> files = new List<Object>();
         private Timer timer;
         private int counter;
-        private const string url = "http://ti.tambou.pl:3000/user-images/";
+        private const string url = "http://ti.tambou.pl:3000/get-campaign/";
         private const string wsUrl = "ws://ti.tambou.pl:3000/";
         private dynamic socket;
-       
+        private string[] timeRange;
+        private DataCampaign campaign;
+
         public MainForm()
         {
             InitializeComponent();
@@ -62,13 +67,15 @@ namespace Koncowka
             socket = Connect(wsUrl, clientName);
 
             this.Text = "Synchronizacja plików...";
-            await Sync.SynchronizeFiles(url, clientName);
+            timeRange = await Sync.SynchronizeFiles(url, clientName);
             this.Text = this.Name;
 
-            FileList(clientName);
+            if (DateTime.Parse(timeRange[0]) <= DateTime.Now && DateTime.Parse(timeRange[1]) > DateTime.Now)
+                FileList(clientName);
 
             if (files.Count > 0)
             {
+                Deserialize(clientName);
                 TimerInit();
             }
             else
@@ -85,6 +92,7 @@ namespace Koncowka
 
                 if (files.Count > 0)
                 {
+                    Deserialize(clientName);
                     TimerInit();
                 }
                 else
@@ -104,32 +112,28 @@ namespace Koncowka
 
         private void FileList(string dirName)
         {
-            List<string> videos = new List<string>();
-
-            var imageEntries = Directory.EnumerateFiles(dirName, "*.*")
-                .Where(s => s.EndsWith(".png") || s.EndsWith(".jpg") || s.EndsWith(".jpeg") || s.EndsWith(".bmp"));
-
-            var videoEntries = Directory.EnumerateFiles(dirName, "*.*")
-            .Where(s => s.EndsWith(".mp4") || s.EndsWith(".avi"));
+            var fileEntries = Directory.EnumerateFiles(dirName, "*.*")
+                .Where(s => s.EndsWith(".png") || s.EndsWith(".jpg") || s.EndsWith(".jpeg") || s.EndsWith(".bmp")
+                || s.EndsWith(".mp4") || s.EndsWith(".avi"));
 
             pictureBox.Image = null;
             files.Clear();
-            videos.Clear();
 
-            foreach (var s in videoEntries)
-            {
-                files.Add(s);
-            }
-
-            foreach (var file in imageEntries)
+            foreach (var file in fileEntries)
             {
                 try
                 {
-                    using (var fs = new System.IO.FileStream(file, System.IO.FileMode.Open))
+                    if (!file.EndsWith(".mp4"))
                     {
-                        var bmp = new Bitmap(fs);
-                        files.Add(ReSize((Bitmap)bmp.Clone()));
+                        using (var fs = new System.IO.FileStream(file, System.IO.FileMode.Open))
+                        {
+
+                            var bmp = new Bitmap(fs);
+                            files.Add(ReSize((Bitmap)bmp.Clone()));
+                        }
                     }
+                    else
+                        files.Add(file);
                 }
                 catch (ArgumentException)
                 {
@@ -169,7 +173,7 @@ namespace Koncowka
             else
             {
                 axWindowsMediaPlayer1.Visible = true;
-                //axWindowsMediaPlayer1.uiMode = "none";
+                axWindowsMediaPlayer1.uiMode = "none";
                 PlayFile((string)files[counter]);
                 timer.Stop();
                 counter++;
@@ -178,9 +182,8 @@ namespace Koncowka
                     pictureBox.Image = (Bitmap)files[counter];
                 }
             }
-
+            timer.Interval = campaign.data.playlist.items[counter].duration * 1000;
             counter = 1;
-            timer.Interval = 5000;
             timer.Tick += new EventHandler(TimerElapsed);
             timer.Start();
         }
@@ -202,18 +205,24 @@ namespace Koncowka
                 if (files[counter] is Bitmap)
                 {
                     pictureBox.Image = (Bitmap)files[counter];
+                    timer.Interval = campaign.data.playlist.items[counter].duration * 1000;
                     counter++;
                 }
                 else if (files[counter] is string)
                 {
                     axWindowsMediaPlayer1.Visible = true;
-                    //axWindowsMediaPlayer1.uiMode = "none";
+                    axWindowsMediaPlayer1.uiMode = "none";
                     PlayFile((string)files[counter]);
                     timer.Stop();
                     counter++;
+
+                    if (counter >= files.Count)
+                        counter = 0;
+                    timer.Interval = campaign.data.playlist.items[counter].duration * 1000;
                     if (files[counter] is Bitmap)
                     {
                         pictureBox.Image = (Bitmap)files[counter];
+                        counter++;
                     }
                 }
             }
@@ -280,15 +289,19 @@ namespace Koncowka
                     this.Text = "Synchronizacja plików...";
                 });
 
-                await Sync.SynchronizeFiles(url, clientName);
+                timeRange = await Sync.SynchronizeFiles(url, clientName);
                 this.Invoke((MethodInvoker)delegate
                 {
                     this.Text = this.Name;
                 });
+                if (DateTime.Parse(timeRange[0]) <= DateTime.Now && DateTime.Parse(timeRange[1]) > DateTime.Now)
+                    FileList(clientName);
+                else
+                    files.Clear();
 
-                FileList(clientName);
                 if (files.Count > 0)
                 {
+                    Deserialize(clientName);
                     try
                     {
                         if (files[counter] is Bitmap)
@@ -296,7 +309,7 @@ namespace Koncowka
                         else
                         {
                             axWindowsMediaPlayer1.Visible = true;
-                            //axWindowsMediaPlayer1.uiMode = "none";
+                            axWindowsMediaPlayer1.uiMode = "none";
                             PlayFile((string)files[counter]);
                             timer.Stop();
                             counter++;
@@ -342,7 +355,7 @@ namespace Koncowka
                     break;
 
                 case 3:    // Playing
-                    //axWindowsMediaPlayer1.fullScreen = true;
+                    axWindowsMediaPlayer1.fullScreen = true;
                     break;
                 default:
                     break;
@@ -350,6 +363,17 @@ namespace Koncowka
         }
 
         public event EventHandler NewContent;
+
+        private void Deserialize(string clientName)
+        {
+            IFormatter formatter = new BinaryFormatter();
+            Stream stream = new FileStream(string.Format("{0}\\Campaign.bin", clientName),
+                                      FileMode.Open,
+                                      FileAccess.Read,
+                                      FileShare.Read);
+            campaign = (DataCampaign)formatter.Deserialize(stream);
+            stream.Close();
+        }
     }
 }
 

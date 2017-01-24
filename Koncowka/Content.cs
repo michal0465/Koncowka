@@ -1,24 +1,43 @@
-﻿using Newtonsoft.Json.Linq;
-using System;
-using System.Linq;
+﻿using System;
+using System.Collections.Generic;
+
 
 namespace Koncowka
 {
-    public class Content
+    [Serializable]
+    public class DataCampaign
     {
-        private string[] arrayOfSrcs;
-        public Content(string json)
-        {
-            JObject jObject = JObject.Parse(json);
-            object[] temp = (object [])(jObject["images"].ToArray());
-            arrayOfSrcs = Array.ConvertAll<object, string>(temp, Convert.ToString);
-        }
-        public string[] ArrayOfSrcs
-        {
-            get
-            {
-                return arrayOfSrcs;
-            }
-        }
+        public Data data { get; set; }
+    }
+
+    [Serializable]
+    public class Data
+    {
+        public bool found { get; set; }
+        public Campaign campaign { get; set; }
+        public PlayList playlist { get; set; }
+    }
+
+    [Serializable]
+    public class Campaign
+    {
+        public string name { get; set; }
+        public string start { get; set; }
+        public string end { get; set; }
+    }
+
+    [Serializable]
+    public class PlayList
+    {
+        public string name { get; set; }
+        public IList<Items> items { get; set; }
+    }
+
+    [Serializable]
+    public class Items
+    {
+        public string type { get; set; }
+        public int duration { get; set; }
+        public string url { get; set; }
     }
 }

@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Formatters.Binary;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -11,22 +13,41 @@ namespace Koncowka
 {
     public static class Sync
     {
-        static public async Task<int> SynchronizeFiles(string url, string clientName)
+        static public async Task<string[]> SynchronizeFiles(string url, string clientName)
         {
             try
             {
-                Content picturesOnServer = new Content(GetResponse(url, clientName));
+                string response = GetResponse(url, clientName);
+                DataCampaign item = JsonConvert.DeserializeObject<DataCampaign>(response);
+
+                string[] fileEntries = Directory.GetFiles(clientName);
+                List<string> filesToDownload = new List<string>();
+                List<string> filesOnServer = new List<string>();
 
                 DirectoryInfo di = new DirectoryInfo(clientName);
                 if (!di.Exists)
                     Directory.CreateDirectory(clientName);
 
-                string[] fileEntries = Directory.GetFiles(clientName);
-                List<string> filesToDownload = new List<string>();
-                //pliki do pobrania
-                if (fileEntries.Length > 0 && picturesOnServer.ArrayOfSrcs.Length > 0)
+                if (item.data.found == true)
                 {
-                    foreach (string fileOnServer in picturesOnServer.ArrayOfSrcs)
+                    foreach (Items it in item.data.playlist.items)
+                    {
+                        filesOnServer.Add(it.url);
+                    }
+                }
+                else
+                {
+                    foreach (string fileOnDisk in fileEntries)
+                    {
+                        File.Delete(fileOnDisk);
+                    }
+                }
+
+
+                //pliki do pobrania
+                if (fileEntries.Length > 0 && filesOnServer.Count > 0)
+                {
+                    foreach (string fileOnServer in filesOnServer)
                     {
                         foreach (string fileOnDisk in fileEntries)
                         {
@@ -36,38 +57,47 @@ namespace Koncowka
                                 filesToDownload.Add(fileOnServer);
                         }
                     }
+
                     //usuwanie zbednych plikow
                     foreach (string fileOnDisk in fileEntries)
                     {
-                        foreach (string fileOnServer in picturesOnServer.ArrayOfSrcs)
+                        foreach (string fileOnServer in filesOnServer)
                         {
                             if (fileOnDisk.Contains(Path.GetFileName(fileOnServer)))
                                 break;
-                            if (fileOnServer == picturesOnServer.ArrayOfSrcs.Last())
+                            if (fileOnServer == filesOnServer.Last())
                                 File.Delete(fileOnDisk);
                         }
                     }
                 }
                 else
                 {
-                    filesToDownload = picturesOnServer.ArrayOfSrcs.ToList<string>();
+                    if (filesOnServer != null)
+                        filesToDownload = filesOnServer.ToList<string>();
                 }
 
                 if (filesToDownload.Count > 0)
                 {
                     await Downloader(filesToDownload, clientName);
                 }
-                return picturesOnServer.ArrayOfSrcs.Length;
+                if (item.data.found == true)
+                {
+                    Serialize(item, clientName);
+
+                    return new string[] { item.data.campaign.start, item.data.campaign.end };
+                }
+
+                return new string[] { "01-01-2017", "01-01-2018" };
             }
             catch (JsonReaderException)
             {
                 MessageBox.Show("Wystąpił bład podczas pobierania danych.");
-                return 0;
+                return new string[] { "01-01-2017", "01-01-2018" };
             }
             catch (IOException)
             {
                 MessageBox.Show("Wystąpił problem podczas synchoronizacji danych.");
-                return 0;
+                return new string[] { "01-01-2017", "01-01-2018" };
             }
         }
 
@@ -91,12 +121,12 @@ namespace Koncowka
             }
             catch (WebException)
             {
-                MessageBox.Show("Błąd połączenia z serwerem");
+                //MessageBox.Show("Błąd połączenia z serwerem");
                 return "";
             }
             catch (UriFormatException)
             {
-                MessageBox.Show("Zła nazwa klienta");
+                //MessageBox.Show("Zła nazwa klienta");
                 return "";
             }
         }
@@ -116,8 +146,18 @@ namespace Koncowka
             }
             catch (WebException)
             {
-                MessageBox.Show("Błąd podczas pobierania danych");
+                //MessageBox.Show("Błąd podczas pobierania danych");
             }
+        }
+
+        private static void Serialize(Object obj, string clientName)
+        {
+            IFormatter formatter = new BinaryFormatter();
+            Stream stream = new FileStream(string.Format("{0}\\Campaign.bin", clientName),
+                                     FileMode.Create,
+                                     FileAccess.Write, FileShare.None);
+            formatter.Serialize(stream, obj);
+            stream.Close();
         }
     }
 }
